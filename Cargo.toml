@@ -1,0 +1,13 @@
+[package]
+name = "hello_cargo"
+version = "0.1.0"
+authors = ["Yoxem Chen <yoxem.tem98@nctu.edu.tw>"]
+edition = "2018"
+
+[dependencies]
+harfbuzz_rs = "2.0.1"
+cairo-rs = { version = "0.14.1", features = ["pdf","ps"]}
+pango =  { version ="0.14.3" ,features = ["v1_42"]}
+pangocairo =  "0.14.0"
+fontconfig = "0.2.1"
+regex = "1.5.4"
