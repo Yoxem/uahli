@@ -12,13 +12,14 @@ use regex::Regex;
 ///
 /// 
 /// Get the infomation of a coodinrate of a box (text slice).
-/// - x: the x length of moving.
-/// - y: the y length of moving
-/// - x_offset: the x moving from the baseline
-/// - y_offset: the y moving from the baseline
+/// - x: the x length of moving in px.
+/// - y: the y length of moving in px
+/// - x_offset: the x moving from the baseline in px
+/// - y_offset: the y moving from the baseline in px
 /// 
 #[derive(Debug)]
 struct BoxCoodInfo {
+    text: String,
     x: f64,
     y: f64,
     x_offset: f64,
@@ -52,7 +53,24 @@ struct FontStruct<'a> {
     features: &'a  [Feature]
 }
 
-
+/// a Div text layout block. unit: px
+/// - x: x-axis in px (from left)
+/// - y: y-axis in px (from top)
+/// - width: Div width in px
+/// - height: Div height in px
+/// - lineskip: the skip between the baseline of 2 lines in px
+/// - direction: Rtl, Ltr, Btt, Ttb
+/// - color: #ffffff -like hex html color code
+#[derive(Debug)]
+struct Div{
+    x: f64,
+    y: f64,
+    width:f64,
+    height: f64,
+    lineskip: f64,
+    direction: harfbuzz_rs::Direction,
+    color: String
+}
 
 /// get the cood infomation of the input box.
 /// - text : the render text
@@ -95,7 +113,7 @@ fn get_box_cood_info(text : &str, font_name : &str, font_style : &str, font_size
         
         assert_eq!(positions.len(), infos.len());
 
-        let mut box_cood = BoxCoodInfo{x: 0.0, y  : 0.0, x_offset: 0.0, y_offset : 0.0};
+        let mut box_cood = BoxCoodInfo{text: text.to_string(), x: 0.0, y  : 0.0, x_offset: 0.0, y_offset : 0.0};
 
         for position in positions {
             /*let gid = info.codepoint;
@@ -122,6 +140,13 @@ fn get_box_cood_info(text : &str, font_name : &str, font_style : &str, font_size
 
             box_cood.x += x_advance;
             box_cood.y += y_advance;
+
+            // convert pt to px
+            box_cood.x *= 0.8;
+            box_cood.y *= 0.8;
+            box_cood.x_offset *= 0.8;
+            box_cood.y_offset *= 0.8;
+
         }
     
     return Some(box_cood);
@@ -175,7 +200,7 @@ fn hex_color_code_to_int(hex : &str)->Option<RgbColor>{
 /// color : hex color `#000000`, etc
 /// canva : cairo canvas
 /// return box_cood if it runs successfully.
-fn layout_text(text : &str, mut font_struct: FontStruct, x : f64, y: f64,color: &str, direction: harfbuzz_rs::Direction, mut canva: &cairo::Context)->Option<BoxCoodInfo>{
+fn layout_text(text : &str, mut font_struct: &FontStruct, x : f64, y: f64,color: &str, direction: harfbuzz_rs::Direction, mut canva: &cairo::Context)->Option<BoxCoodInfo>{
     let fontmap = pangocairo::FontMap::default().unwrap();
     let font_combined = format!("{} {}", font_struct.name, font_struct.style);
 
@@ -210,16 +235,81 @@ fn layout_text(text : &str, mut font_struct: FontStruct, x : f64, y: f64,color: 
     return Some(box_cood);
 }
 
+
+fn greedy_typesetting(box_coord_vec : Vec<Option<BoxCoodInfo>>, block: Div, font: FontStruct, cxt : &cairo::Context){
+    let mut current_x = block.x;
+    let mut current_y = block.y;
+
+    for i in &box_coord_vec{
+        match i {
+            Some(inner) =>{
+                if (current_x + inner.x) <= block.x + block.width {
+                    layout_text(&(inner.text), &font,  current_x, current_y, &(block.color) ,block.direction , &cxt);
+                    current_x += inner.x
+                // try to add a new line
+                }else{
+                    current_x = block.x;
+                    current_y += block.lineskip;
+                    // if beneath the margin of the botton, don't layout it and break
+                    if current_y > block.height{
+                        break;
+                    }
+                    else{
+                        layout_text(&(inner.text), &font,  current_x, current_y, &(block.color) ,block.direction , &cxt);
+                        current_x += inner.x
+                    }
+
+                }
+            }
+            None    => println!("The text segment can't be layouted."),
+        }
+    }
+
+}
+
 fn main(){
     let font_pt = 20;
 
-    let font_name = "Amstelvar";
-    let font_style = "Italic";
+    /*let font_name = "Amstelvar";
+    let font_style = "Italic";*/
 
+    let font_name = "AR PL UMing TW";
+    let font_style = "Bold";
 
     const PDF_WIDTH_IN_PX : f64 = 595.0;
     const PDF_HEIGHT_IN_PX : f64 = 842.0;
     let pdf_path = "/tmp/a.pdf";
+
+    let mut regex_pattern1 = r"([^\s\p{Bopomofo}\p{Han}\p{Hangul}\p{Hiragana}\p{Katakana}。，、；：「」『』（）？！─……《》〈〉．～～゠‥｛｝［］〔〕〘〙〈〉《》【】〖〗※〳〵〴〲〱〽〃]{1,}|".to_string();
+    let regex_pattern2 = r"[\p{Bopomofo}\p{Han}\p{Hangul}\p{Hiragana}\p{Katakana}。，、；：「」『』（）？！─……《》〈〉．～～゠‥｛｝［］〔〕〘〙〈〉《》【】〖〗※〳〵〴〲〱〽〃]|──|〴〵|〳〵)";
+    regex_pattern1.push_str(&regex_pattern2);
+    let regex_pattern = Regex::new(&regex_pattern1).unwrap();
+    //let input_text = "我kā lí講這件——代誌彼は아버지 감사합니다といいます。It's true. happier. Ta̍k-ke. ٱلسَّلَامُ عَلَيْكُمْ שָׁלוֹם עֲלֵיכֶם";
+    let input_text = "望月峯頭白露滋，南飛烏鵲怨無枝；不知消瘦嫦娥影，還得娟娟似舊時？題望月峯——梁啟超。「旗中黃虎尚如生，國建共和怎不成。天與台灣原獨立，我疑記載欠分明。」「唉！寂寞的人生 / 寂寞得 / 似沙漠上的孤客 / 這句經誰說過的話 / 忽回到我善忘的記憶 / 在紛擾擾的人世間 / 我儘在孤獨蕭瑟 / 像徘徊在沙漠中 / 找不到行過人的蹤跡。」——賴和。吳濁流：「 永夜　永夜　沒有星光　沒有月亮　沒有詩聲　沒有歌唱　萬籟俱寂　天地無分　黑暗　黑暗　黑暗」——吳濁流";
+
+
+
+    let mut input_text_vec = vec!();
+
+    let block = Div{x:100.0,y:100.0,width:450.0, height: 250.0, lineskip: 30.0, direction: harfbuzz_rs::Direction::Ltr, color: "#198964".to_string()};
+
+
+    let mut text : String;
+    for cap in regex_pattern.captures_iter(input_text){
+        let text = cap[0].to_string().clone();
+        
+        input_text_vec.push(text);
+    }
+
+    println!("{:?}", input_text_vec);
+
+    let mut font_struct1 =  FontStruct{size:font_pt, name:font_name, style:font_style, variations : &[Variation::new(b"wght", 200.0),
+         Variation::new(b"wdth", 20.0)], features : &[]};
+
+    let box_coord_vec : Vec<Option<BoxCoodInfo>> = input_text_vec.into_iter().map(|x| get_box_cood_info(&x, font_struct1.name, font_struct1.style, font_struct1.size, harfbuzz_rs::Direction::Ltr, &[], &[])).collect();
+
+    println!("{:?}", box_coord_vec);
+
 
 
     let surface = cairo::PdfSurface::new(PDF_WIDTH_IN_PX, PDF_HEIGHT_IN_PX, pdf_path).expect("Couldn’t create surface"); // A4 size
@@ -235,16 +325,17 @@ fn main(){
         cxt.set_source_rgba(0.0, 0.0, 1.0, 1.0); // 設定顏色
         println!("{:?}",cxt.source());
 
-        let font_struct1 =  FontStruct{size:font_pt, name:font_name, style:font_style, variations : &[Variation::new(b"wght", 200.0),
-         Variation::new(b"wdth", 20.0)], features : &[]};
+        
         let font_struct2 =  FontStruct{size:30, name:"Noto Sans CJK TC", style:"Bold", variations : &[], features : &[]};
 
         let font_struct3 =  FontStruct{size:30, name:"Noto Nastaliq Urdu", style:"Bold", variations : &[], features : &[]};
 
-        layout_text("Tá grá agam duit", font_struct1,  100.0, 100.0,"#198964",harfbuzz_rs::Direction::Ltr, &cxt);
+        //layout_text("Tá grá agam duit", font_struct1,  100.0, 100.0,"#198964",harfbuzz_rs::Direction::Ltr, &cxt);
 
-        layout_text("我疼Lí", font_struct2,  100.0, 200.0,"#198964",harfbuzz_rs::Direction::Ltr, &cxt);
+        layout_text("一寡詩歌", &font_struct2,  50.0, 200.0,"#0000ff",harfbuzz_rs::Direction::Ltr, &cxt);
 
-        layout_text("انا احبك ", font_struct3,  100.0, 300.0,"#198964",harfbuzz_rs::Direction::Rtl, &cxt);
+        //layout_text("انا احبك ", &font_struct3,  100.0, 300.0,"#198964",harfbuzz_rs::Direction::Rtl, &cxt);
         // println!("{:?}", result);
+
+        greedy_typesetting(box_coord_vec, block, font_struct1, &cxt);
 }
