@@ -2,12 +2,13 @@ extern crate cairo;
 extern crate fontconfig;
 extern crate pango;
 use std::convert::TryInto;
+use std::collections::HashMap;
 use std::str;
 use harfbuzz_rs::*;
 use pangocairo;
 use pangocairo::prelude::FontMapExt;
 use regex::Regex;
-
+use std::str::FromStr;
 
 
 
@@ -21,16 +22,24 @@ struct Line<'a>{
     content: Vec<&'a BoxCoodInfo>,
     div_text_offset: f64
 }
-/*
+
 pub struct MinRaggedLayouter {
-    x: f64,
-    y: f64
+    hashmap_cost: HashMap<u32, f64>,
+    hashmap_route: HashMap<u32, u32>,
+    words: String,
+    path: Vec<u32>
     }
 
+    /*
 impl MinRaggedLayouter {
-        // Getter for x, public
-        pub fn x(& self) -> f64 {
-            self.x
+        ///
+        /// counting total_cost of a line ragged cost.
+        ///  - words : the words listed here.
+        ///  - dest : destination (k)
+        ///  - maxwidth: in pt.
+        pub fn total(&mut self, words : Vec<Option<BoxCoodInfo>>, dest : u32, maxwidth : f64 ) -> f64 {
+
+            
         }
     }*/
 
@@ -88,12 +97,13 @@ struct FontStruct<'a> {
 /// - direction: Rtl, Ltr, Btt, Ttb
 /// - color: #ffffff -like hex html color code
 #[derive(Debug)]
-struct Div{
+struct Div<'a>{
     x: f64,
     y: f64,
     width:f64,
     height: f64,
     lineskip: f64,
+    language: &'a str,
     direction: harfbuzz_rs::Direction,
     color: String
 }
@@ -106,7 +116,7 @@ struct Div{
 /// - direction: Ltr, Rtl, etc,
 /// - variations: Opentype variation axis list
 /// - features: Opentype feature list
-fn get_box_cood_info(text : &str, font_name : &str, font_style : &str, font_size_pt : u32,
+fn get_box_cood_info(text : &str, font_name : &str, font_style : &str, font_size_pt : u32, language: &str,
     direction : harfbuzz_rs::Direction, variations : &[Variation], features: & [Feature])
     ->  Option<BoxCoodInfo>  {
         // let font_combined = format!("{} {}", font_name, font_style);
@@ -127,7 +137,10 @@ fn get_box_cood_info(text : &str, font_name : &str, font_style : &str, font_size
 
         font.set_scale((font_size_pt*64).try_into().unwrap(), (font_size_pt*64).try_into().unwrap()); // setting the pt size
 
-        let buffer = UnicodeBuffer::new().set_direction(direction).add_str(text);
+        let hb_language = harfbuzz_rs::Language::from_str(language).unwrap();
+
+        let mut buffer = UnicodeBuffer::new().set_direction(direction).set_language(hb_language).add_str(text);
+        
 
         // shape the text box
         let output = shape(&font, buffer, &features);
@@ -222,9 +235,11 @@ fn hex_color_code_to_int(hex : &str)->Option<RgbColor>{
 /// x : x-axis coord in pt.
 /// y : y-axis coord in pt.
 /// color : hex color `#000000`, etc
+/// lang: string eg. "en", "zh", etc.
+/// direction: harfbuzz_rs::Direction
 /// canva : cairo canvas
 /// return box_cood if it runs successfully.
-fn layout_text(text : &str, mut font_struct: &FontStruct, x : f64, y: f64,color: &str, direction: harfbuzz_rs::Direction, mut canva: &cairo::Context)
+fn layout_text(text : &str, mut font_struct: &FontStruct, x : f64, y: f64,color: &str, lang: &str, direction: harfbuzz_rs::Direction, mut canva: &cairo::Context)
 ->Option<()>
 {
     let fontmap = pangocairo::FontMap::default().unwrap();
@@ -241,6 +256,8 @@ fn layout_text(text : &str, mut font_struct: &FontStruct, x : f64, y: f64,color:
     let _pango_cairo_font = fontmap.load_font(&pango_cxt, &font_with_style);
 
     //let box_cood = get_box_cood_info(text, font_struct.name, font_struct.style, font_struct.size, direction, font_struct.variations, &[])?;
+
+    pango_cxt.set_language(&pango::language::Language::from_string(lang));
 
     pango_cxt.set_font_map(&fontmap);
     let pango_layout = pango::Layout::new(&pango_cxt);
@@ -273,7 +290,7 @@ fn greedy_typesetting(box_coord_vec : Vec<Option<BoxCoodInfo>>, block: Div, font
     //get the space width.
     let mut space_width = 0.0;
 
-    let space_box_cood = get_box_cood_info(" ", font.name, font.style, font.size, block.direction, font.variations, font.features);
+    let space_box_cood = get_box_cood_info(" ", font.name, font.style, font.size, block.language, block.direction,  font.variations, font.features);
     match space_box_cood {
         Some(inner) =>{
             space_width = inner.width;
@@ -383,7 +400,7 @@ fn greedy_typesetting(box_coord_vec : Vec<Option<BoxCoodInfo>>, block: Div, font
                 }
 
 
-                layout_text(&(con.text), &font,  current_x, current_y, &(block.color) ,block.direction , &cxt);
+                layout_text(&(con.text), &font,  current_x, current_y, &(block.color) ,block.language, block.direction , &cxt);
                 current_x += content_width;
             }
             current_y += block.lineskip;
@@ -419,7 +436,7 @@ fn greedy_typesetting(box_coord_vec : Vec<Option<BoxCoodInfo>>, block: Div, font
                         current_x += line_space_width;
                     }else{
 
-                        layout_text(&(con.text), &font,  current_x, current_y, &(block.color) ,block.direction , &cxt);
+                        layout_text(&(con.text), &font,  current_x, current_y, &(block.color) , block.language, block.direction , &cxt);
                         current_x += con.width;
                     }
                 }
@@ -439,7 +456,7 @@ fn greedy_typesetting(box_coord_vec : Vec<Option<BoxCoodInfo>>, block: Div, font
                     }
 
 
-                    layout_text(&(con.text), &font,  current_x, current_y, &(block.color) ,block.direction , &cxt);
+                    layout_text(&(con.text), &font,  current_x, current_y, &(block.color) , block.language, block.direction , &cxt);
                     current_x += content_width;
                 }
             }
@@ -475,13 +492,13 @@ fn main(){
     regex_pattern1.push_str(&regex_pattern2);
     let regex_pattern = Regex::new(&regex_pattern1).unwrap();
     //let input_text = "我kā lí講這件——代誌彼は아버지 감사합니다といいます。It's true. happier. Ta̍k-ke. ٱلسَّلَامُ عَلَيْكُمْ שָׁלוֹם עֲלֵיכֶם";
-    let input_text = "And why all this? Certainly not because I believe that the land or the region has anything to do with it, for in any place and in any climate subjection is bitter and to be free is pleasant; but merely because I am of the opinion that one should pity those who, at birth, arrive with the yoke upon their necks. We should exonerate and forgive them, since they have not seen even the shadow of liberty, and, being quite unaware of it, cannot perceive the evil endured through their own slavery. If there were actually a country like that of the Cimmerians mentioned by Homer,";
+    let input_text = "And why all this?d’aoís Certainly not because I believe that the land or the region has anything to do with it, for in any place and in any climate subjection is bitter and to be free is pleasant; but merely because I am of the opinion that one should pity those who, at birth, arrive with the yoke upon their necks. We should exonerate and forgive them, since they have not seen even the shadow of liberty, and, being quite unaware of it, cannot perceive the evil endured through their own slavery. If there were actually a country like that of the Cimmerians mentioned by Homer,";
 
     // 翻譯：在主後1602年，戰爭爆發於兩個以之間——以．歐尼爾和以．如瓦．歐唐納，在金特塞里附近，那時愛爾蘭人民在戰場激烈的耗了九年，對抗他們的敵人，為了……
 
     let mut input_text_vec = vec!();
 
-    let block = Div{x:100.0,y:100.0,width:450.0, height: 250.0, lineskip: 30.0, direction: harfbuzz_rs::Direction::Ltr, color: "#198964".to_string()};
+    let block = Div{x:100.0,y:100.0,width:450.0, height: 250.0, lineskip: 30.0, language: "en", direction: harfbuzz_rs::Direction::Ltr, color: "#198964".to_string()};
 
 
     let mut text : String;
@@ -495,7 +512,7 @@ fn main(){
     let mut font_struct1 =  FontStruct{size:font_pt, name:font_name, style:font_style, variations : &[Variation::new(b"wght", 200.0),
          Variation::new(b"wdth", 20.0)], features : &[]};
 
-    let box_coord_vec : Vec<Option<BoxCoodInfo>> = input_text_vec.into_iter().map(|x| get_box_cood_info(&x, font_struct1.name, font_struct1.style, font_struct1.size, harfbuzz_rs::Direction::Ltr, &[], &[])).collect();
+    let box_coord_vec : Vec<Option<BoxCoodInfo>> = input_text_vec.into_iter().map(|x| get_box_cood_info(&x, font_struct1.name, font_struct1.style, font_struct1.size, block.language, harfbuzz_rs::Direction::Ltr, &[], &[])).collect();
 
 
 
