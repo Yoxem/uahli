@@ -9,19 +9,45 @@ use pangocairo::prelude::FontMapExt;
 use regex::Regex;
 
 
+
+
 ///
-/// 
+///
+/// storing line data.
+/// - content : the vec of the line content of Option<BoxCoodInfo>
+/// - div_text_offset: the offset between div width and text width
+#[derive(Debug)]
+struct Line<'a>{
+    content: Vec<&'a BoxCoodInfo>,
+    div_text_offset: f64
+}
+/*
+pub struct MinRaggedLayouter {
+    x: f64,
+    y: f64
+    }
+
+impl MinRaggedLayouter {
+        // Getter for x, public
+        pub fn x(& self) -> f64 {
+            self.x
+        }
+    }*/
+
+///
+///
 /// Get the infomation of a coodinrate of a box (text slice).
-/// - x: the x length of moving in px.
-/// - y: the y length of moving in px
-/// - x_offset: the x moving from the baseline in px
-/// - y_offset: the y moving from the baseline in px
-/// 
+/// - text: the text of it.
+/// - width: the x length of moving in pt.
+/// - height: the y length of moving in pt
+/// - x_offset: the x moving from the baseline in pt
+/// - y_offset: the y moving from the baseline in pt
+///
 #[derive(Debug)]
 struct BoxCoodInfo {
     text: String,
-    x: f64,
-    y: f64,
+    width: f64,
+    height: f64,
     x_offset: f64,
     y_offset: f64
 }
@@ -32,18 +58,18 @@ struct BoxCoodInfo {
 /// - blue: 0 ~ 255
 #[derive(Debug)]
 struct RgbColor{
-    red: u32, 
+    red: u32,
     green: u32,
     blue: u32
 }
-/// 
+///
 /// The structure storing a font and its attribution.
 /// - name : font name . eg. "FreeSans"
 /// - style : font style. eg. "Italic"
 /// - size : in pt. eg. "32" for 32pt
 /// - variations. variation of a opentype font. eg. `vec![Variation::new(b"wght", 800.0);]`
 /// - features. features of a opentype font. eg. `vec![Feature::new(b"calt", 1, 0..)]`
-/// 
+///
 #[derive(Debug)]
 struct FontStruct<'a> {
     name: &'a str,
@@ -53,12 +79,12 @@ struct FontStruct<'a> {
     features: &'a  [Feature]
 }
 
-/// a Div text layout block. unit: px
-/// - x: x-axis in px (from left)
-/// - y: y-axis in px (from top)
-/// - width: Div width in px
-/// - height: Div height in px
-/// - lineskip: the skip between the baseline of 2 lines in px
+/// a Div text layout block. unit: pt
+/// - x: x-axis in pt (from left)
+/// - y: y-axis in pt (from top)
+/// - width: Div width in pt
+/// - height: Div height in pt
+/// - lineskip: the skip between the baseline of 2 lines in pt
 /// - direction: Rtl, Ltr, Btt, Ttb
 /// - color: #ffffff -like hex html color code
 #[derive(Debug)]
@@ -80,7 +106,7 @@ struct Div{
 /// - direction: Ltr, Rtl, etc,
 /// - variations: Opentype variation axis list
 /// - features: Opentype feature list
-fn get_box_cood_info(text : &str, font_name : &str, font_style : &str, font_size_pt : u32, 
+fn get_box_cood_info(text : &str, font_name : &str, font_style : &str, font_size_pt : u32,
     direction : harfbuzz_rs::Direction, variations : &[Variation], features: & [Feature])
     ->  Option<BoxCoodInfo>  {
         // let font_combined = format!("{} {}", font_name, font_style);
@@ -110,25 +136,21 @@ fn get_box_cood_info(text : &str, font_name : &str, font_style : &str, font_size
         let positions = output.get_glyph_positions();
         let infos = output.get_glyph_infos();
 
-        
+
         assert_eq!(positions.len(), infos.len());
 
-        let mut box_cood = BoxCoodInfo{text: text.to_string(), x: 0.0, y  : 0.0, x_offset: 0.0, y_offset : 0.0};
+        let mut box_cood = BoxCoodInfo{text: text.to_string(), width: 0.0, height  : 0.0, x_offset: 0.0, y_offset : 0.0};
 
-        for position in positions {
-            /*let gid = info.codepoint;
-            let cluster = info.cluster;
-            let glyph_name = Font::get_glyph_name(&font, gid);*/
+        for position in positions{
+ 
 
             let x_advance = (position.x_advance) as f64/64.0;
             let y_advance = (position.y_advance) as f64/64.0;
             let x_offset = (position.x_offset) as f64/64.0;
             let y_offset = (position.y_offset) as f64/64.0;
-        
-        
 
-            // Here you would usually draw the glyphs.
-            //println!("gid{:?}[{:?}]={:?}@{:?}:{:?},\t{:?}+{:?}", gid, glyph_name, cluster, current_x, current_y, x_offset, y_offset);
+
+
 
             // set the max_x(y)_advance as the box_cood.x(y)_advance
             if box_cood.x_offset<x_offset{
@@ -138,17 +160,19 @@ fn get_box_cood_info(text : &str, font_name : &str, font_style : &str, font_size
                 box_cood.y_offset = y_offset
             }
 
-            box_cood.x += x_advance;
-            box_cood.y += y_advance;
+            box_cood.width += x_advance;
+            box_cood.height += y_advance;
 
-            // convert pt to px
-            box_cood.x *= 0.8;
-            box_cood.y *= 0.8;
-            box_cood.x_offset *= 0.8;
-            box_cood.y_offset *= 0.8;
+
 
         }
-    
+
+    // convert to pt
+    box_cood.width;
+    box_cood.height;
+    box_cood.x_offset;
+    box_cood.y_offset;
+
     return Some(box_cood);
 
 }
@@ -171,7 +195,7 @@ fn font_variant_list_to_string(vars : &[Variation]) -> String{
 }
 
 ///
-/// 
+///
 /// convert hex color code to rgb 256 number. eg.
 /// #ffffff -> RgbColor{red:256, green:256, blue:256}
 /// - hex : the hex color code to be input
@@ -191,18 +215,22 @@ fn hex_color_code_to_int(hex : &str)->Option<RgbColor>{
 }
 
 ///
-/// 
+///
 /// show `text` in `canva` at `x` and `y` with `font_struct`
 /// text : the text to be rendered.
 /// font_sruct: font and its attributes
-/// x : x-axis coord in px.
-/// y : y-axis coord in px.
+/// x : x-axis coord in pt.
+/// y : y-axis coord in pt.
 /// color : hex color `#000000`, etc
 /// canva : cairo canvas
 /// return box_cood if it runs successfully.
-fn layout_text(text : &str, mut font_struct: &FontStruct, x : f64, y: f64,color: &str, direction: harfbuzz_rs::Direction, mut canva: &cairo::Context)->Option<BoxCoodInfo>{
+fn layout_text(text : &str, mut font_struct: &FontStruct, x : f64, y: f64,color: &str, direction: harfbuzz_rs::Direction, mut canva: &cairo::Context)
+->Option<()>
+{
     let fontmap = pangocairo::FontMap::default().unwrap();
-    let font_combined = format!("{} {}", font_struct.name, font_struct.style);
+
+    // you have to multiply 0.75 or you'll get a bug.
+    let font_combined = format!("{} {} {}", font_struct.name, font_struct.style, (font_struct.size as f64) * 0.75);
 
     let mut font_with_style = pango::FontDescription::from_string(&font_combined);
    //  pango_font_style.set_absolute_size((font_struct.size * 1024).into());
@@ -212,7 +240,7 @@ fn layout_text(text : &str, mut font_struct: &FontStruct, x : f64, y: f64,color:
 
     let _pango_cairo_font = fontmap.load_font(&pango_cxt, &font_with_style);
 
-    let box_cood = get_box_cood_info(text, font_struct.name, font_struct.style, font_struct.size, direction, font_struct.variations, &[])?;
+    //let box_cood = get_box_cood_info(text, font_struct.name, font_struct.style, font_struct.size, direction, font_struct.variations, &[])?;
 
     pango_cxt.set_font_map(&fontmap);
     let pango_layout = pango::Layout::new(&pango_cxt);
@@ -220,51 +248,213 @@ fn layout_text(text : &str, mut font_struct: &FontStruct, x : f64, y: f64,color:
     pango_layout.set_text(text);
 
     // setting the color
-    canva.save();
+    canva.save().ok();
     let color_rgb = hex_color_code_to_int(color)?;
-    
+
     canva.set_source_rgb(color_rgb.red as f64/256.0, color_rgb.green as f64/256.0, color_rgb.blue as f64/256.0);
 
 
     canva.move_to(x, y);
     pangocairo::show_layout(&canva, &pango_layout);
 
-    canva.restore();
+    canva.restore().ok();
     canva.move_to(0.0, 0.0);
 
-    return Some(box_cood);
+    return Some(());
 }
 
 
-fn greedy_typesetting(box_coord_vec : Vec<Option<BoxCoodInfo>>, block: Div, font: FontStruct, cxt : &cairo::Context){
+
+///
+/// typesetting for greedy algorithm using unragged.
+/// for arguments, see `greedy_typesetting`
+fn greedy_typesetting(box_coord_vec : Vec<Option<BoxCoodInfo>>, block: Div, font: FontStruct, cxt : &cairo::Context, ragged : bool){
+
+    //get the space width.
+    let mut space_width = 0.0;
+
+    let space_box_cood = get_box_cood_info(" ", font.name, font.style, font.size, block.direction, font.variations, font.features);
+    match space_box_cood {
+        Some(inner) =>{
+            space_width = inner.width;
+        }
+        None=>println!("The space width can't be defined. Set it to 0.")
+    }
+    let mut lines = vec![];  // store lines
+    let mut line =  vec![];  // store a line
+
     let mut current_x = block.x;
     let mut current_y = block.y;
+
+    let mut div_txt_offset = 0.0; // the offset between div width and text width
+
+    let mut is_overflowed = false;
 
     for i in &box_coord_vec{
         match i {
             Some(inner) =>{
-                if (current_x + inner.x) <= block.x + block.width {
-                    layout_text(&(inner.text), &font,  current_x, current_y, &(block.color) ,block.direction , &cxt);
-                    current_x += inner.x
+                let mut inner_width = inner.width;
+                if Regex::new(r"[ \t\n]+").unwrap().is_match(&(inner.text)){
+                    inner_width = space_width;
+                }
+
+                if (current_x + inner_width) <= block.x + block.width {
+                    line.push(inner);
+
+                    // if inner is not space, set the div_txt_offset
+                    if !is_space(&inner.text){
+                        div_txt_offset = block.x + block.width - (current_x + inner.width); 
+                    }
+                    current_x += inner_width;
                 // try to add a new line
                 }else{
+
+
                     current_x = block.x;
                     current_y += block.lineskip;
+
+                    let div_txt_offset_clone = div_txt_offset.clone();
+
+                    let line_clone  = line.clone();
+                    let line_content = Line{
+                                        content: line_clone,
+                                        div_text_offset: div_txt_offset_clone};
+
+                    lines.push(line_content);
+
+
                     // if beneath the margin of the botton, don't layout it and break
-                    if current_y > block.height{
+                    if current_y > block.y + block.height{
+                        is_overflowed = true;
                         break;
                     }
                     else{
-                        layout_text(&(inner.text), &font,  current_x, current_y, &(block.color) ,block.direction , &cxt);
-                        current_x += inner.x
+                        /*println!("{:?}", space_width);
+                        println!("{:?}", div_txt_offset);
+                        println!("{:?}", block.x + block.width);*/
+
+                        line = vec![];
+                        div_txt_offset = 0.0;
+
+                        // if it's non space, add it.
+                        if !Regex::new(r"[ \t\n]+").unwrap().is_match(&(inner.text)){
+                            line.push(inner);
+                            current_x += inner_width;
+                        }
+
                     }
 
                 }
             }
             None    => println!("The text segment can't be layouted."),
         }
+
+
     }
 
+    // if it's not overflowed,  push the last line.
+
+    if !is_overflowed{
+        let div_txt_offset_clone = div_txt_offset.clone();
+
+        let line_clone  = line.clone();
+        let line_content = Line{
+                                    content: line_clone,
+                                    div_text_offset: div_txt_offset_clone};
+
+        lines.push(line_content);
+
+    }else{
+
+    }
+
+    // layout the characters
+    if ragged == true{
+        current_y = block.y;
+        current_x = block.x;
+        for i in 0..lines.len(){
+            for j in 0..lines[i].content.len(){
+                let con = lines[i].content[j];
+
+                let mut content_width = con.width;
+                // if it's space, set it to space_width.
+                if is_space(&(con.text)){
+                    content_width = space_width;
+                }
+
+
+                layout_text(&(con.text), &font,  current_x, current_y, &(block.color) ,block.direction , &cxt);
+                current_x += content_width;
+            }
+            current_y += block.lineskip;
+            current_x = block.x;
+        }
+
+    // unragged.
+    }else{
+
+        current_y = block.y;
+        current_x = block.x;
+        for i in 0..lines.len(){
+
+            let mut line_word_len_without_space = 0;
+
+            // count line word actually len (without spaces)
+            for j in 0..lines[i].content.len(){
+                if !is_space(&(lines[i].content[j].text)){
+                    line_word_len_without_space += 1;
+                }
+            }
+            // non last line
+            if (i < lines.len() - 1) || (is_overflowed) {
+
+
+                let line_space_width = space_width + lines[i].div_text_offset / (line_word_len_without_space as f64 - 1.0);
+
+                for j in 0..lines[i].content.len(){
+                        let con = lines[i].content[j];
+
+
+                    if is_space(&(con.text)){
+                        current_x += line_space_width;
+                    }else{
+
+                        layout_text(&(con.text), &font,  current_x, current_y, &(block.color) ,block.direction , &cxt);
+                        current_x += con.width;
+                    }
+                }
+
+                current_y += block.lineskip;
+                current_x = block.x;
+            }
+            // last line and if it's not overflowed
+            else{
+                for j in 0..lines[i].content.len(){
+                    let con = lines[i].content[j];
+
+                    let mut content_width = con.width;
+                    // if it's space, set it to space_width.
+                    if is_space(&(con.text)){
+                        content_width = space_width;
+                    }
+
+
+                    layout_text(&(con.text), &font,  current_x, current_y, &(block.color) ,block.direction , &cxt);
+                    current_x += content_width;
+                }
+            }
+
+        }
+
+
+    }
+}
+
+/// check if it's a space of not.
+///
+///
+fn is_space(txt : &str) -> bool{
+    return Regex::new(r"[ \t]+").unwrap().is_match(&txt)
 }
 
 fn main(){
@@ -273,21 +463,21 @@ fn main(){
     /*let font_name = "Amstelvar";
     let font_style = "Italic";*/
 
-    let font_name = "AR PL UMing TW";
-    let font_style = "Bold";
+    let font_name = "Noto Sans CJK TC";
+    let font_style = "Light";
 
     const PDF_WIDTH_IN_PX : f64 = 595.0;
     const PDF_HEIGHT_IN_PX : f64 = 842.0;
     let pdf_path = "/tmp/a.pdf";
 
     let mut regex_pattern1 = r"([^\s\p{Bopomofo}\p{Han}\p{Hangul}\p{Hiragana}\p{Katakana}。，、；：「」『』（）？！─……《》〈〉．～～゠‥｛｝［］〔〕〘〙〈〉《》【】〖〗※〳〵〴〲〱〽〃]{1,}|".to_string();
-    let regex_pattern2 = r"[\p{Bopomofo}\p{Han}\p{Hangul}\p{Hiragana}\p{Katakana}。，、；：「」『』（）？！─……《》〈〉．～～゠‥｛｝［］〔〕〘〙〈〉《》【】〖〗※〳〵〴〲〱〽〃]|──|〴〵|〳〵)";
+    let regex_pattern2 = r"[　\p{Bopomofo}\p{Han}\p{Hangul}\p{Hiragana}\p{Katakana}。，、；：「」『』（）？！─……《》〈〉．～～゠‥｛｝［］〔〕〘〙〈〉《》【】〖〗※〳〵〴〲〱〽〃]|──|〴〵|〳〵|[ \t]+)";
     regex_pattern1.push_str(&regex_pattern2);
     let regex_pattern = Regex::new(&regex_pattern1).unwrap();
     //let input_text = "我kā lí講這件——代誌彼は아버지 감사합니다といいます。It's true. happier. Ta̍k-ke. ٱلسَّلَامُ عَلَيْكُمْ שָׁלוֹם עֲלֵיכֶם";
-    let input_text = "望月峯頭白露滋，南飛烏鵲怨無枝；不知消瘦嫦娥影，還得娟娟似舊時？題望月峯——梁啟超。「旗中黃虎尚如生，國建共和怎不成。天與台灣原獨立，我疑記載欠分明。」「唉！寂寞的人生 / 寂寞得 / 似沙漠上的孤客 / 這句經誰說過的話 / 忽回到我善忘的記憶 / 在紛擾擾的人世間 / 我儘在孤獨蕭瑟 / 像徘徊在沙漠中 / 找不到行過人的蹤跡。」——賴和。吳濁流：「 永夜　永夜　沒有星光　沒有月亮　沒有詩聲　沒有歌唱　萬籟俱寂　天地無分　黑暗　黑暗　黑暗」——吳濁流";
+    let input_text = "And why all this? Certainly not because I believe that the land or the region has anything to do with it, for in any place and in any climate subjection is bitter and to be free is pleasant; but merely because I am of the opinion that one should pity those who, at birth, arrive with the yoke upon their necks. We should exonerate and forgive them, since they have not seen even the shadow of liberty, and, being quite unaware of it, cannot perceive the evil endured through their own slavery. If there were actually a country like that of the Cimmerians mentioned by Homer,";
 
-
+    // 翻譯：在主後1602年，戰爭爆發於兩個以之間——以．歐尼爾和以．如瓦．歐唐納，在金特塞里附近，那時愛爾蘭人民在戰場激烈的耗了九年，對抗他們的敵人，為了……
 
     let mut input_text_vec = vec!();
 
@@ -297,18 +487,16 @@ fn main(){
     let mut text : String;
     for cap in regex_pattern.captures_iter(input_text){
         let text = cap[0].to_string().clone();
-        
+
         input_text_vec.push(text);
     }
 
-    println!("{:?}", input_text_vec);
 
     let mut font_struct1 =  FontStruct{size:font_pt, name:font_name, style:font_style, variations : &[Variation::new(b"wght", 200.0),
          Variation::new(b"wdth", 20.0)], features : &[]};
 
     let box_coord_vec : Vec<Option<BoxCoodInfo>> = input_text_vec.into_iter().map(|x| get_box_cood_info(&x, font_struct1.name, font_struct1.style, font_struct1.size, harfbuzz_rs::Direction::Ltr, &[], &[])).collect();
 
-    println!("{:?}", box_coord_vec);
 
 
 
@@ -316,26 +504,23 @@ fn main(){
 
     let cxt = cairo::Context::new(&surface).expect("running error");
 
-    
+
 
 
         cxt.set_source_rgba(0.8, 1.0, 1.0, 0.5); // 設定顏色
         cxt.paint().ok();// 設定背景顏色
 
         cxt.set_source_rgba(0.0, 0.0, 1.0, 1.0); // 設定顏色
-        println!("{:?}",cxt.source());
 
-        
+
         let font_struct2 =  FontStruct{size:30, name:"Noto Sans CJK TC", style:"Bold", variations : &[], features : &[]};
 
         let font_struct3 =  FontStruct{size:30, name:"Noto Nastaliq Urdu", style:"Bold", variations : &[], features : &[]};
 
         //layout_text("Tá grá agam duit", font_struct1,  100.0, 100.0,"#198964",harfbuzz_rs::Direction::Ltr, &cxt);
 
-        layout_text("一寡詩歌", &font_struct2,  50.0, 200.0,"#0000ff",harfbuzz_rs::Direction::Ltr, &cxt);
-
         //layout_text("انا احبك ", &font_struct3,  100.0, 300.0,"#198964",harfbuzz_rs::Direction::Rtl, &cxt);
         // println!("{:?}", result);
 
-        greedy_typesetting(box_coord_vec, block, font_struct1, &cxt);
+        greedy_typesetting(box_coord_vec, block, font_struct1, &cxt, false);
 }
